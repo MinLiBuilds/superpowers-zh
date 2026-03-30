@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, cpSync, readdirSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, cpSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -16,7 +16,7 @@ const TARGETS = [
   { name: 'Codex CLI',     dir: '.codex/skills',            detect: '.codex' },
   { name: 'Kiro',          dir: '.kiro/steering',            detect: '.kiro' },
   { name: 'DeerFlow',      dir: 'skills/custom',             detect: 'deer_flow' },
-  { name: 'Trae',          dir: '.trae/rules',               detect: '.trae' },
+  { name: 'Trae',          dir: '.trae/skills',              detect: '.trae' },
   { name: 'Antigravity',   dir: '.antigravity/skills',       detect: '.antigravity' },
   { name: 'VS Code',       dir: '.github/superpowers',       detect: '.github/copilot-instructions.md' },
   { name: 'OpenClaw',      dir: 'skills',                     detect: '.openclaw' },
@@ -30,6 +30,67 @@ const TARGETS = [
 function countDirs(dir) {
   if (!existsSync(dir)) return 0;
   return readdirSync(dir, { withFileTypes: true }).filter(e => e.isDirectory()).length;
+}
+
+function generateTraeBootstrapRule(projectDir) {
+  const rulesDir = resolve(projectDir, '.trae', 'rules');
+  mkdirSync(rulesDir, { recursive: true });
+
+  // 扫描已安装的 skills，读取 name 和 description
+  const skillsDir = resolve(projectDir, '.trae', 'skills');
+  const skillEntries = [];
+  if (existsSync(skillsDir)) {
+    for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const skillFile = resolve(skillsDir, entry.name, 'SKILL.md');
+      if (!existsSync(skillFile)) continue;
+      const content = readFileSync(skillFile, 'utf8');
+      const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+      if (!fmMatch) continue;
+      const nameMatch = fmMatch[1].match(/^name:\s*(.+)$/m);
+      const descMatch = fmMatch[1].match(/^description:\s*["']?(.+?)["']?\s*$/m);
+      if (nameMatch) {
+        skillEntries.push({
+          name: nameMatch[1].trim(),
+          desc: descMatch ? descMatch[1].trim() : '',
+        });
+      }
+    }
+  }
+
+  const skillTable = skillEntries.map(s => `| ${s.name} | ${s.desc} |`).join('\n');
+
+  const rule = `---
+alwaysApply: true
+---
+
+# Superpowers-ZH 中文增强版
+
+你已加载 superpowers-zh 技能框架（${skillEntries.length} 个 skills）。
+
+## 核心规则
+
+1. **收到任务时，先检查是否有匹配的 skill** — 哪怕只有 1% 的可能性也要检查
+2. **设计先于编码** — 收到功能需求时，先用 brainstorming skill 做需求分析
+3. **测试先于实现** — 写代码前先写测试（TDD）
+4. **验证先于完成** — 声称完成前必须运行验证命令
+
+## 可用 Skills
+
+Skills 位于 \`.trae/skills/\` 目录，每个 skill 有独立的 \`SKILL.md\` 文件。
+
+| Skill | 触发条件 |
+|-------|---------|
+${skillTable}
+
+## 如何使用
+
+当任务匹配某个 skill 的触发条件时，读取对应的 \`.trae/skills/<skill-name>/SKILL.md\` 并严格遵循其流程。
+`;
+
+  const rulePath = resolve(rulesDir, 'superpowers-zh.md');
+  writeFileSync(rulePath, rule, 'utf8');
+  console.log(`  ✅ Trae: bootstrap rule -> ${rulePath}`);
 }
 
 function showHelp() {
@@ -77,6 +138,10 @@ function install() {
       const count = countDirs(dest);
       console.log(`  ✅ ${target.name}: ${count} 个 skills -> ${dest}`);
       installed++;
+
+      if (target.name === 'Trae') {
+        generateTraeBootstrapRule(PROJECT_DIR);
+      }
 
       if (target.name === 'Claude Code' && existsSync(AGENTS_SRC)) {
         const agentsDest = resolve(PROJECT_DIR, '.claude', 'agents');
